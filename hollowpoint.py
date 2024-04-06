@@ -19,7 +19,7 @@ REGION_IP_BLOCKS = {
 }
 
 # Commonly used ports for scanning
-COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993, 995, 1723, 3306, 3389, 5900, 8080]
+COMMON_PORTS = [20, 21, 22, 23, 25, 53, 69, 80, 110, 135, 137, 139, 143, 443, 445, 993, 995, 1433, 1434, 1723, 3306, 3389, 4444, 5900, 8080, 8443]
 
 # Function to generate a random IPv4 address within a specific IP address block using subnet mask
 def generate_random_ip(region):
@@ -52,11 +52,12 @@ def ping_ip(ip):
     except subprocess.TimeoutExpired:
         return None
 
-# Function to save online IP addresses with open ports to a file
+# Function to save online IP addresses to a file
 def save_to_file(online_ips):
-    with open('targets.txt', 'w') as f:
-        for ip, ports, city, region, country in online_ips:
-            f.write(f"IP: {ip}, Open Ports: {ports}, Location: {city}, {region}, {country}\n")
+    mode = 'a' if os.path.exists('online_ips.txt') else 'w'
+    with open('online_ips.txt', mode) as f:
+        for ip in online_ips:
+            f.write(ip + '\n')
 
 # Function to get geolocation information for an IP address
 def get_geolocation(ip):
@@ -81,6 +82,19 @@ def scan_ports(ip):
             pass  # Ignore any errors and continue scanning other ports
     return open_ports
 
+# Function to detect OS using nmap through proxychains with a slight delay
+def detect_os(ip):
+    try:
+        output = subprocess.check_output(['proxychains', 'nmap', '-O', ip], timeout=60)
+        return output.decode("utf-8")
+    except subprocess.TimeoutExpired:
+        print(f"Timeout occurred while detecting OS for IP: {ip}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred while detecting OS for IP: {ip}, Error: {e}")
+    finally:
+        time.sleep(1)  # Add a 1-second delay after each OS detection attempt
+    return None
+
 # Function to display usage instructions
 def display_usage():
     print("Usage: python ip_scanner.py <num_ips> [<region>]")
@@ -92,7 +106,6 @@ def display_usage():
 
 # Main function
 def main(num_ips, region=None):
-    print("Starting IP scanning...")
     if region and region not in REGION_IP_BLOCKS:
         print("Invalid region. Run the script with -h or --help for usage instructions.")
         return
@@ -101,36 +114,53 @@ def main(num_ips, region=None):
 
     def scan_ip(ip):
         if ping_ip(ip):
-            print(f"Scanning IP: {ip}")
             open_ports = scan_ports(ip)
             if open_ports:
                 city, region, country = get_geolocation(ip)
                 online_ips_with_ports.append((ip, open_ports, city, region, country))
+                print(f"IP: {ip}, Open Ports: {open_ports}, Location: {city}, {region}, {country}")
 
+                # Update OS detection
+                os_info = detect_os(ip)
+                if os_info:
+                    print(f"OS detection for IP {ip}:")
+                    print(os_info)
+            else:
+                print(f"IP: {ip}, No open ports found")
+        else:
+            print(f"IP: {ip}, Offline")
+
+    num_threads = min(num_ips, 100)  # Limit the number of threads to avoid excessive resource usage
     threads = []
-    for _ in range(10):  # Number of threads to use
-        t = threading.Thread(target=lambda: [scan_ip(generate_random_ip(region)) for _ in range(num_ips)])
-        threads.append(t)
+
+    for _ in range(num_threads):
+        t = threading.Thread(target=lambda: [scan_ip(generate_random_ip(region)) for _ in range(num_ips // num_threads)])
         t.start()
+        threads.append(t)
 
     for t in threads:
         t.join()
 
+    # Save online IPs with open ports to a file
     if online_ips_with_ports:
-        print("Online IP addresses with open ports:")
-        for ip, ports, city, region, country in online_ips_with_ports:
-            print(f"IP: {ip}, Open Ports: {ports}, Location: {city}, {region}, {country}")
-        save_to_file(online_ips_with_ports)  # Save the results to a file
-        print("Results saved to targets.txt")
+        save_to_file([f"IP: {ip}, Open Ports: {ports}, Location: {city}, {region}, {country}" for ip, ports, city, region, country in online_ips_with_ports])
     else:
-        print("No online IP addresses with open ports found")
-
-    print("IP scanning completed.")
+        print("No online IPs with open ports found.")
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1 or sys.argv[1] in {"-h", "--help"}:
-        display_usage()
-    else:
-        num_ips = int(sys.argv[1]) if len(sys.argv) > 1 else 10  # Number of IP addresses to generate (default: 10)
-        region = sys.argv[2] if len(sys.argv) > 2 else None  # Region to generate IP addresses for
-        main(num_ips, region)
+    num_ips = 10
+    region = None
+
+    if len(sys.argv) >= 2:
+        if sys.argv[1] in ('-h', '--help'):
+            display_usage()
+            sys.exit(0)
+        try:
+            num_ips = int(sys.argv[1])
+            if len(sys.argv) >= 3:
+                region = sys.argv[2]
+        except ValueError:
+            print("Invalid number of IP addresses. Please provide a valid integer.")
+            sys.exit(1)
+
+    main(num_ips, region)
