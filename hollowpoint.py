@@ -42,10 +42,15 @@ def generate_random_ip(region):
     ip_int = network_int | host_int
     return socket.inet_ntoa(struct.pack("!I", ip_int))
 
+# Function to generate a random IP address block
+def generate_random_block():
+    region = random.choice(list(REGION_IP_BLOCKS.keys()))
+    return region, generate_random_ip(region)
+
 # Function to ping an IP address
 def ping_ip(ip):
     try:
-        subprocess.check_output(['ping', '-c', '1', ip], stderr=subprocess.STDOUT, timeout=0.5)
+        subprocess.check_output(['ping', '-c', '1', ip], stderr=subprocess.STDOUT)
         return ip
     except subprocess.CalledProcessError:
         return None
@@ -85,7 +90,7 @@ def scan_ports(ip):
 # Function to detect OS using nmap through proxychains with a slight delay
 def detect_os(ip):
     try:
-        output = subprocess.check_output(['proxychains', 'nmap', '-O', ip], timeout=60)
+        output = subprocess.check_output(['nmap', '-O', '-A', '-Pn', ip], timeout=60)
         return output.decode("utf-8")
     except subprocess.TimeoutExpired:
         print(f"Timeout occurred while detecting OS for IP: {ip}")
@@ -103,10 +108,14 @@ def display_usage():
     print("  <region>: Optional. Region to generate IP addresses for. Available regions:")
     for region in REGION_IP_BLOCKS:
         print(f"    - {region}")
+    print("    - Random: Generate IP addresses in a random region")
 
 # Main function
 def main(num_ips, region=None):
-    if region and region not in REGION_IP_BLOCKS:
+    if region == "Random":
+        region, ip = generate_random_block()
+        print(f"Random region selected: {region}")
+    elif region and region not in REGION_IP_BLOCKS:
         print("Invalid region. Run the script with -h or --help for usage instructions.")
         return
 
